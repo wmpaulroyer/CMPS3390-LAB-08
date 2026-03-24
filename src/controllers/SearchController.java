@@ -4,75 +4,61 @@ import org.json.JSONObject;
 import views.MainView;
 import views.ResultsView;
 
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URL;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.util.Scanner;
 
 public class SearchController {
-    private final MainView view;
+    private static final String SEARCH_URL = "https://cs.csub.edu/~paul/3390/lab08/search.php";
+    private final HttpClient http = HttpClient.newHttpClient();
 
-    public SearchController(MainView view){
-        this.view = view;
+    public SearchController(MainView view) {
 
-        view.attachSearchListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                String searchTerm = view.getSearchTerm();
-                String searchText = view.getSearchText();
+        view.attachSearchListener(e -> {
+            String searchTerm = view.getSearchTerm().trim();
+            String searchText = view.getSearchText().trim();
 
+            if (searchTerm.isEmpty() || searchText.isEmpty()) {
+                view.displayError("Please enter both a search term and search text.");
+                return;
+            }
+
+            try {
                 String html = postSearch(searchTerm, searchText);
 
                 ResultsView resultsView = new ResultsView("Search", html);
                 new ResultsController(resultsView);
-
                 resultsView.setVisible(true);
+            } catch (RuntimeException ex) {
+                view.displayError("Unable to perform search!");
             }
         });
     }
 
-    private String postSearch(String term, String text){
-        URL url = null;
-        Scanner scanner = null;
-        JSONObject postBody = new JSONObject();
-        StringBuilder htmlRes = new StringBuilder();
-
-        postBody.put("search", term);
-        postBody.put("text", text);
-
-        // MAKE API REQUEST AND BUILD RESPONSE STRING
+    private String postSearch(String term, String text) {
         try {
-            url = new URI("https://cs.csub.edu/~paul/3390/lab08/search.php").toURL();
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setDoOutput(true);
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty( "Content-Type", "application/json; charset=UTF-8");
-            conn.setRequestProperty("Accept", "text/html");
+            JSONObject postBody = new JSONObject();
+            postBody.put("search", term);
+            postBody.put("text", text);
 
-            OutputStream os = conn.getOutputStream();
-            os.write(postBody.toString().getBytes(StandardCharsets.UTF_8));
-            os.close();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(SEARCH_URL))
+                    .header("Content-Type", "application/json; charset=UTF-8")
+                    .header("Accept", "text/html")
+                    .POST(HttpRequest.BodyPublishers.ofString(postBody.toString(), StandardCharsets.UTF_8))
+                    .build();
 
-            if(conn.getResponseCode() != 200){
-                throw new RuntimeException("Invalid Server Request");
+            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("Invalid server request");
             }
 
-            scanner = new Scanner(conn.getInputStream());
-            while(scanner.hasNext()){
-                htmlRes.append(scanner.nextLine());
-            }
-
-            scanner.close();
+            return response.body();
         } catch (Exception e) {
-            System.err.println(e.getMessage());
-            view.displayError("Unable to get quote!");
+            throw new RuntimeException(e);
         }
-
-        // PARSE JSON OBJECT FROM RESPONSE
-        return htmlRes.toString();
-   }
+    }
 }
